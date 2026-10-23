@@ -85,6 +85,7 @@ jobs:
             CUDA_ARCHITECTURES=${{ env.CUDA_ARCH }}
             BUILD_VISION=1
             STRATA_VERSION=0.2.3-lmcache
+            STRATA_COMMIT=${{ github.sha }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:0.2.3-lmcache

@@ -1,0 +1,150 @@
+name: Docker images (CUDA 13.0, A10)
+
+# Builds two images from one Dockerfile:
+#   runtime : Strata + the LMCache bridge, engine compiled with CUDA 13.0 for sm_86 (A10)
+#   lmcache : the LMCache daemon (CPU/RAM) with the strata_blob server module
+#
+# The first push to main builds both.  Images go to the GitHub Container
+# Registry as ghcr.io/<owner>/strata-lmcache:latest and :lmcache.  A fork or a
+# user without package access can run the workflow with "push" off to build
+# only (the log then shows the local image digest).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push the images to ghcr.io"
+        type: boolean
+        default: true
+      cuda_arch:
+        description: "CUDA architecture (86 = A10 / RTX 30, 89 = RTX 40, 120 = RTX 50)"
+        type: string
+        default: "86"
+      lmcache_spec:
+        description: "pip requirement for LMCache (a version, or a VCS URL)"
+        type: string
+        default: "lmcache==0.3.1"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: chenwei0930/strata-lmcache
+  CUDA_ARCH: ${{ github.event.inputs.cuda_arch || '86' }}
+  LMCACHE_SPEC: ${{ github.event.inputs.lmcache_spec || 'lmcache==0.3.1' }}
+  PUSH: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push == true) }}
+
+jobs:
+  strata:
+    name: Strata runtime (CUDA 13.0, sm_${{ github.event.inputs.cuda_arch || '86' }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo apt-get clean
+          docker system prune -af || true
+          df -h /
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Strata
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          push: ${{ env.PUSH == 'true' }}
+          build-args: |
+            CUDA_IMAGE=nvidia/cuda:13.0.0-devel-ubuntu24.04
+            RUNTIME_BASE=ubuntu:24.04
+            CUDA_ARCHITECTURES=${{ env.CUDA_ARCH }}
+            BUILD_VISION=1
+            STRATA_VERSION=0.2.3-lmcache
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:0.2.3-lmcache
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=0.2.3-lmcache
+            org.opencontainers.image.title=Strata with LMCache
+            com.strata.cuda=13.0
+            com.strata.arch=sm_${{ env.CUDA_ARCH }}
+          cache-from: type=gha,scope=strata-runtime
+          cache-to: type=gha,mode=max,scope=strata-runtime
+
+  lmcache:
+    name: LMCache daemon (CPU/RAM)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo apt-get clean
+          docker system prune -af || true
+          df -h /
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push LMCache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: lmcache
+          platforms: linux/amd64
+          push: ${{ env.PUSH == 'true' }}
+          build-args: |
+            RUNTIME_BASE=ubuntu:24.04
+            LMCACHE_PIP_SPEC=${{ env.LMCACHE_SPEC }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:lmcache
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:lmcache-0.2.3
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:lmcache-sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=0.2.3-lmcache
+            org.opencontainers.image.title=LMCache for Strata
+          cache-from: type=gha,scope=strata-lmcache
+          cache-to: type=gha,mode=max,scope=strata-lmcache

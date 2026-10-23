@@ -1,0 +1,137 @@
+# Four A10 services and one LMCache daemon.
+#
+#   cd deploy
+#   cp .env.example .env        # edit
+#   docker compose up -d
+#
+# Each Strata service runs on one card.  The LMCache daemon is CPU/RAM only
+# (CUDA_VISIBLE_DEVICES is empty in its image) and holds the shared prefix store
+# in memory.  The services talk to it over HTTP on port 8081.
+services:
+  lmcache:
+    image: ghcr.io/chenwei0930/strata-lmcache:lmcache
+    container_name: strata-lmcache
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6555:6555"     # LMCache ZMQ (optional; operators/other clients)
+      - "127.0.0.1:8080:8080"     # LMCache status API
+      - "127.0.0.1:8081:8081"     # strata_blob HTTP data interface (Strata uses this)
+    environment:
+      LMCACHE_MAX_BYTES: ${LMCACHE_MAX_BYTES:-68719476736}
+      LMCACHE_BLOB_PORT: "8081"
+      LMCACHE_L1_GB: "1"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  strata-0:
+    image: ghcr.io/chenwei0930/strata-lmcache:latest
+    container_name: strata-0
+    restart: unless-stopped
+    depends_on: [lmcache]
+    ports: ["127.0.0.1:8091:8080"]
+    shm_size: "8g"
+    ulimits:
+      memlock: -1
+    volumes:
+      - strata-data-0:/data
+      - ${STRATA_MODEL_DIR:-./models}:/models:ro
+    environment:
+      MODEL: ${MODEL:-}
+      MODEL_PATH: /models
+      API_KEY: ${API_KEY:?set API_KEY in deploy/.env}
+      GPU: "0"
+      STRATA_LMCACHE_URL: http://lmcache:8081
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+
+  strata-1:
+    image: ghcr.io/chenwei0930/strata-lmcache:latest
+    container_name: strata-1
+    restart: unless-stopped
+    depends_on: [lmcache]
+    ports: ["127.0.0.1:8092:8080"]
+    shm_size: "8g"
+    ulimits:
+      memlock: -1
+    volumes:
+      - strata-data-1:/data
+      - ${STRATA_MODEL_DIR:-./models}:/models:ro
+    environment:
+      MODEL: ${MODEL:-}
+      MODEL_PATH: /models
+      API_KEY: ${API_KEY:?set API_KEY in deploy/.env}
+      GPU: "1"
+      STRATA_LMCACHE_URL: http://lmcache:8081
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+
+  strata-2:
+    image: ghcr.io/chenwei0930/strata-lmcache:latest
+    container_name: strata-2
+    restart: unless-stopped
+    depends_on: [lmcache]
+    ports: ["127.0.0.1:8093:8080"]
+    shm_size: "8g"
+    ulimits:
+      memlock: -1
+    volumes:
+      - strata-data-2:/data
+      - ${STRATA_MODEL_DIR:-./models}:/models:ro
+    environment:
+      MODEL: ${MODEL:-}
+      MODEL_PATH: /models
+      API_KEY: ${API_KEY:?set API_KEY in deploy/.env}
+      GPU: "2"
+      STRATA_LMCACHE_URL: http://lmcache:8081
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["2"]
+              capabilities: [gpu]
+
+  strata-3:
+    image: ghcr.io/chenwei0930/strata-lmcache:latest
+    container_name: strata-3
+    restart: unless-stopped
+    depends_on: [lmcache]
+    ports: ["127.0.0.1:8094:8080"]
+    shm_size: "8g"
+    ulimits:
+      memlock: -1
+    volumes:
+      - strata-data-3:/data
+      - ${STRATA_MODEL_DIR:-./models}:/models:ro
+    environment:
+      MODEL: ${MODEL:-}
+      MODEL_PATH: /models
+      API_KEY: ${API_KEY:?set API_KEY in deploy/.env}
+      GPU: "3"
+      STRATA_LMCACHE_URL: http://lmcache:8081
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["3"]
+              capabilities: [gpu]
+
+volumes:
+  strata-data-0:
+  strata-data-1:
+  strata-data-2:
+  strata-data-3:
